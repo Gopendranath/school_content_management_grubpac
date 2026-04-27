@@ -36,6 +36,16 @@ async function generateOpenApi() {
       spec.servers = [{ url: '/api/v1', description: 'API Base Path' }];
     }
 
+    // Remove /api/v1 prefix from all paths to avoid duplication with server URL
+    if (spec.paths) {
+      const newPaths: any = {};
+      Object.keys(spec.paths).forEach(path => {
+        const newPath = path.replace(/^\/api\/v1/, '');
+        newPaths[newPath] = spec.paths[path];
+      });
+      spec.paths = newPaths;
+    }
+
     // Add JWT Bearer security scheme
     spec.components = spec.components || {};
     spec.components.securitySchemes = {
