@@ -91,6 +91,9 @@ app.use((req, res) => {
   sendError(res, 'Route not found', 404);
 });
 
+app.use("/", (_req, res) => {
+  res.json({ message: "All routes are under /api/v1" });
+});
 // Global error handler
 app.use(errorHandler);
 
