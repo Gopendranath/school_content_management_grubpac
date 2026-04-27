@@ -57,17 +57,7 @@ interface ActiveContentResponse {
   data: Content | Content[] | Record<string, Content> | null;
   message?: string;
   cacheStatus?: 'HIT' | 'MISS';
-}
-
-interface ScheduleInfoItem {
-  subject: string;
-  items: Array<{
-    contentId: string;
-    title: string;
-    rotationOrder: number;
-    duration: number;
-  }>;
-}
+};
 
 /**
  * Scheduling service for content rotation engine
@@ -200,52 +190,6 @@ export const schedulingService = {
       };
     } catch (error) {
       logger.error(`[Scheduling] Error fetching active content for teacher ${teacherId}:`, error);
-      throw error;
-    }
-  },
-
-  /**
-   * Get full schedule information for a teacher
-   * Useful for debugging and teacher dashboard
-   */
-  async getScheduleInfo(teacherId: string): Promise<ScheduleInfoItem[]> {
-    try {
-      // Fetch all approved content for this teacher
-      const allContent = await contentRepository.findByTeacherId(teacherId);
-      const approvedContent = allContent.filter((c) => c.status === 'approved');
-
-      // Group by subject
-      const groupedBySubject: Record<string, Content[]> = {};
-      for (const item of approvedContent) {
-        if (!groupedBySubject[item.subject]) {
-          groupedBySubject[item.subject] = [];
-        }
-        groupedBySubject[item.subject].push(item);
-      }
-
-      // Build schedule info
-      const scheduleInfo: ScheduleInfoItem[] = [];
-
-      for (const [subj, items] of Object.entries(groupedBySubject)) {
-        // Sort by duration (we need rotation_order from content_schedule table ideally,
-        // but for now we'll just sort by creation order or ID)
-        const sortedItems = items.map((item) => ({
-          contentId: item.id,
-          title: item.title,
-          rotationOrder: 0, // We'd need a join to contentSchedule to get this
-          duration: item.rotationDuration || 5,
-        }));
-
-        scheduleInfo.push({
-          subject: subj,
-          items: sortedItems,
-        });
-      }
-
-      logger.info(`[Scheduling] Retrieved schedule info for teacher ${teacherId}`);
-      return scheduleInfo;
-    } catch (error) {
-      logger.error(`[Scheduling] Error fetching schedule info for teacher ${teacherId}:`, error);
       throw error;
     }
   },

@@ -126,10 +126,4 @@ export const broadcastController = {
 
     return sendSuccess(res, null, 'No content available', 200);
   }),
-
-  getScheduleInfo: asyncHandler(async (req: Request, res: Response) => {
-    const { teacherId } = req.params;
-    const scheduleInfo = await schedulingService.getScheduleInfo(teacherId);
-    sendSuccess(res, scheduleInfo);
-  }),
 };

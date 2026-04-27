@@ -19,12 +19,23 @@ const appLogger = pino({
 });
 
 // Security headers
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'script-src': ["'self'", 'https://cdn.jsdelivr.net', 'blob:', "'unsafe-inline'"],
+      'worker-src': ["'self'", 'blob:'],
+      'connect-src': ["'self'", 'https://cdn.jsdelivr.net'],
+      'img-src': ["'self'", 'data:', 'https:'],
+      'style-src': ["'self'", 'https://cdn.jsdelivr.net', "'unsafe-inline'"],
+    },
+  },
+}));
 
 // CORS configuration
 const allowedOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',') : ['http://localhost:3000'];
 app.use(cors({
-  origin: allowedOrigins,
+  origin: allowedOrigins || '*',
   credentials: true,
 }));
 
@@ -73,11 +84,12 @@ app.use(pinoHttp({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static file serving for uploads
-app.use('/uploads', express.static(env.UPLOAD_DIR));
-
 // Routes
 import routes from './routes/index.js';
+import docsRoutes from './routes/docs.routes.js';
+
+// Mount docs route outside /api/v1
+app.use('/api-docs', docsRoutes);
 
 // Apply rate limiters to specific routes
 app.use('/api/v1/auth', authLimiter);
@@ -85,6 +97,11 @@ app.use('/api/v1/content', publicLimiter);
 app.use('/api/v1/content/live', publicLimiter);
 
 app.use('/api/v1', routes);
+
+// Health check endpoint for Render
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
 
 // 404 handler
 app.use((req, res) => {
@@ -97,5 +114,4 @@ app.use("/", (_req, res) => {
 // Global error handler
 app.use(errorHandler);
 
-export { publicLimiter, authLimiter };
 export default app;

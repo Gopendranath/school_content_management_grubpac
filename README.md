@@ -98,14 +98,15 @@ The system follows a clean three-layer architecture:
 | Command | Description |
 |---------|-------------|
 | `pnpm dev` | Start development server with hot reload |
-| `pnpm build` | Compile TypeScript to JavaScript |
+| `pnpm build` | Compile TypeScript and generate OpenAPI docs |
 | `pnpm start` | Start production server |
-| `pnpm typecheck` | Run TypeScript type checking |
+| `pnpm docs:generate` | Generate OpenAPI spec from Postman collection |
+| `pnpm db:generate` | Generate Drizzle migration |
+| `pnpm db:push` | Push schema to database |
+| `pnpm db:seed` | Seed default users |
+| `pnpm db:reset` | Reset database (drop all tables, rerun migration + seed) |
 | `pnpm lint` | Run ESLint |
-| `pnpm db:generate` | Generate Drizzle migration files |
-| `pnpm db:push` | Push schema directly to database (dev) |
-| `pnpm db:seed` | Seed database with default users |
-| `pnpm db:reset` | Reset database (drop tables, migrate, seed) |
+| `pnpm typecheck` | Run TypeScript type check |
 
 ### Utility Scripts
 

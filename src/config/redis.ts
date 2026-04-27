@@ -87,8 +87,4 @@ export const cacheService = {
       logger.warn(`[Redis] Error deleting keys with pattern ${pattern}:`, error);
     }
   },
-
-  isConnected(): boolean {
-    return redis !== null && redis.status === 'ready';
-  },
 };

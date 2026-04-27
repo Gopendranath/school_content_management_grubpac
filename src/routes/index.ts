@@ -9,7 +9,7 @@ router.use('/', (_req, res) => {
   res.json({ 
     message: "Available endpoints:", 
     endpoints: ["/auth", "/content", "/content/live"],
-    documentation: "See API documentation inside docs/postman_collection.json for detailed endpoint information"
+    documentation: "/api-docs"
   });
 });
 

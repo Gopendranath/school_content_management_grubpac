@@ -46,10 +46,6 @@ export const contentRepository = {
       .where(eq(content.status, 'pending'));
   },
 
-  async findAll(): Promise<Content[]> {
-    return await db.select().from(content);
-  },
-
   async findAllWithDetails(): Promise<(Content & { uploaderName: string; uploaderEmail: string; approverName?: string | null; approverEmail?: string | null })[]> {
     const approver = alias(users, 'approver');
 
@@ -154,38 +150,5 @@ export const contentRepository = {
   }) {
     const [schedule] = await db.insert(contentSchedule).values(data).returning();
     return schedule;
-  },
-
-  async getContentWithSchedule(contentId: string) {
-    return await db
-      .select({
-        id: content.id,
-        title: content.title,
-        description: content.description,
-        subject: content.subject,
-        fileUrl: content.fileUrl,
-        fileType: content.fileType,
-        fileSize: content.fileSize,
-        uploadedBy: content.uploadedBy,
-        status: content.status,
-        rejectionReason: content.rejectionReason,
-        approvedBy: content.approvedBy,
-        approvedAt: content.approvedAt,
-        startTime: content.startTime,
-        endTime: content.endTime,
-        rotationDuration: content.rotationDuration,
-        createdAt: content.createdAt,
-        scheduleId: contentSchedule.id,
-        slotId: contentSchedule.slotId,
-        rotationOrder: contentSchedule.rotationOrder,
-        duration: contentSchedule.duration,
-        slotTeacherId: contentSlots.teacherId,
-        slotSubject: contentSlots.subject,
-      })
-      .from(content)
-      .leftJoin(contentSchedule, eq(content.id, contentSchedule.contentId))
-      .leftJoin(contentSlots, eq(contentSchedule.slotId, contentSlots.id))
-      .where(eq(content.id, contentId))
-      .limit(1);
   },
 };
