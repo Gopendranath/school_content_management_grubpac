@@ -1,0 +1,350 @@
+# Content Broadcasting System - Architecture Notes
+
+## Authentication & RBAC Flow
+
+### JWT Token Flow
+1. User registers or logs in via `/api/v1/auth/register` or `/api/v1/auth/login`
+2. Server validates credentials and generates JWT token with 15-minute expiry
+3. Token payload contains: `{ userId, role, iat, exp }`
+4. Client includes token in `Authorization: Bearer <token>` header for protected routes
+5. `authenticate` middleware verifies token signature and expiry
+6. `authorize` middleware checks user role against required role
+
+### Role-Based Access Control (RBAC)
+- **Principal**: Can access `/api/v1/approval/*` routes (approve/reject content)
+- **Teacher**: Can access `/api/v1/content/upload`, `/api/v1/content/my` routes
+- **Public**: Can access `/api/v1/content/live/:teacherId` without authentication
+
+### Middleware Chain
+1. `helmet()` - Security headers
+2. `cors()` - CORS configuration
+3. `rateLimit()` - Rate limiting (100 req/15min public, 10 req/15min auth)
+4. Request ID generation - UUID attached to all requests
+5. `pinoHttp()` - Logging with request context
+6. `express.json()` - Body parsing
+7. Route-specific middleware:
+   - `authenticate` - JWT verification
+   - `authorize` - Role check
+   - `validate` - Zod schema validation
+   - `validateUUID` - UUID format validation
+8. Controller handler
+9. Global error handler
+
+## Subject-Based System Design
+
+### Content Slots
+- Table: `content_slots`
+- Purpose: Establish teacher-subject relationships
+- Unique constraint: `(teacher_id, subject)`
+- Auto-created on content upload if slot doesn't exist
+
+### Content Schedule
+- Table: `content_schedule`
+- Purpose: Define rotation order and duration for content within a slot
+- Fields: `content_id`, `slot_id`, `rotation_order`, `duration`
+- Multiple content items can be scheduled in one subject slot
+- Rotation order determines display sequence
+
+### Subject Grouping
+- Content is organized by subject per teacher
+- Each teacher can have multiple subjects
+- Each subject can have multiple content items in rotation
+- Scheduling engine calculates active content per subject independently
+
+## Upload Handling Approach
+
+### Multer Configuration
+- Storage: Memory storage (for streaming to Cloudinary)
+- File naming: UUID-based to prevent collisions
+- File size limit: Configured via `MAX_FILE_SIZE_MB` env var
+- Allowed fields: `file` (single file upload)
+- Fallback: Local disk storage if Cloudinary not configured
+
+### Cloudinary Integration
+- **Primary Storage**: Cloudinary CDN for production deployments
+- **Fallback Storage**: Local disk in `uploads/` directory when Cloudinary not configured
+- **Upload Flow**:
+  1. Multer stores file in memory buffer
+  2. Cloudinary service uploads buffer to Cloudinary
+  3. Cloudinary returns secure URL and public ID
+  4. Database stores Cloudinary URL as `file_url`
+  5. If Cloudinary fails or not configured, falls back to local storage
+- **Folder Structure**: Files organized by teacher ID in Cloudinary (`content/<teacherId>`)
+- **Transformations**: Auto quality and format optimization applied
+- **Deletion**: Cloudinary files can be deleted using public ID (not yet implemented in content deletion)
+
+### Validation Order
+1. File size check (Multer middleware)
+2. Authentication (teacher role required)
+3. Schema validation (title, subject, description, dates, duration)
+4. Cloudinary upload attempt (if configured)
+5. Fallback to local storage (if Cloudinary fails or not configured)
+6. Content creation in database
+7. Auto-creation of content_slot if needed
+8. Auto-creation of content_schedule if needed
+
+### File URL Generation
+- **Cloudinary**: Secure URL from Cloudinary (e.g., `https://res.cloudinary.com/...`)
+- **Local**: File URL format: `<uuid>-<timestamp>.<extension>`
+- **Local Serving**: Served via static route: `/uploads/<filename>`
+- No public access to upload directory except through app
+
+## Approval Workflow Design
+
+### State Machine
+```
+pending → approved (by principal)
+pending → rejected (by principal with reason)
+```
+
+### Approval Process
+1. Teacher uploads content → status: `pending`
+2. Principal views pending content via `/api/v1/approval/pending`
+3. Principal approves via `/api/v1/approval/:id/approve` → status: `approved`
+4. Principal rejects via `/api/v1/approval/:id/reject` → status: `rejected` + reason
+
+### Approval Constraints
+- Only principals can approve/reject
+- Only pending content can be approved/rejected
+- Rejection requires reason (min 10 chars, max 500 chars)
+- Approved/rejected content cannot change status without admin intervention
+
+### Approval Metadata
+- `approved_by`: UUID of principal who approved
+- `approved_at`: Timestamp of approval
+- `rejection_reason`: Text reason for rejection (if rejected)
+
+## Scheduling/Rotation Logic
+
+### Deterministic Rotation Algorithm
+- **Epoch Anchor**: Fixed timestamp `2024-01-01T00:00:00Z`
+- **No Database State**: Rotation calculated purely from time
+- **Deterministic**: Same second = same result across all clients
+
+### Calculation Steps
+1. Fetch approved content within time window (start_time ≤ NOW ≤ end_time)
+2. Group content by subject
+3. For each subject:
+   - Sort content by rotation_order ASC
+   - Calculate total cycle duration = SUM(all durations in minutes)
+   - Calculate elapsed = (NOW - epoch_anchor) % total_cycle_duration
+   - Walk through items summing durations until elapsed is consumed
+   - Return the item where elapsed falls
+
+### Single Item Optimization
+- If only one item in subject, always return it (no rotation calculation)
+- This is handled in `calculateActiveIndex()` function
+
+### Multi-Subject Response
+- When no subject filter provided, returns object with all subjects:
+  ```json
+  {
+    "Maths": { <activeItem> },
+    "Science": { <activeItem> }
+  }
+  ```
+- Each subject calculated independently with same epoch anchor
+
+## Database Design Decisions
+
+### Table: `users`
+- **Purpose**: Store user accounts and authentication data
+- **Key fields**: `id` (UUID), `email` (unique), `password_hash` (bcrypt), `role` (enum)
+- **Indexes**: `email` (unique)
+
+### Table: `content`
+- **Purpose**: Store content metadata and approval status
+- **Key fields**: `id` (UUID), `title`, `subject`, `file_url`, `uploaded_by` (FK), `status`, `approved_by` (FK)
+- **Time window**: `start_time`, `end_time` (content only active within this window)
+- **Rotation**: `rotation_duration` (minutes)
+- **Indexes**: `uploaded_by`, `status`, `subject`
+
+### Table: `content_slots`
+- **Purpose**: Establish teacher-subject relationships
+- **Key fields**: `id` (UUID), `teacher_id` (FK), `subject`
+- **Unique constraint**: `(teacher_id, subject)`
+- **Auto-created**: On content upload if slot doesn't exist
+
+### Table: `content_schedule`
+- **Purpose**: Define rotation order and duration for content
+- **Key fields**: `id` (UUID), `content_id` (FK), `slot_id` (FK), `rotation_order`, `duration`
+- **Indexes**: `slot_id`, `content_id`
+
+### Foreign Key Relationships
+- `content.uploaded_by` → `users.id`
+- `content.approved_by` → `users.id`
+- `content_slots.teacher_id` → `users.id`
+- `content_schedule.content_id` → `content.id`
+- `content_schedule.slot_id` → `content_slots.id`
+
+## Folder Structure
+
+```
+src/
+├── config/           # Configuration (env, db, logger, multer)
+├── controllers/      # Request handlers (auth, content, approval, broadcast)
+├── middlewares/      # Express middleware (auth, authorize, validate, error)
+├── models/           # Drizzle schema definitions
+├── repositories/     # Database access layer (users, content)
+├── routes/           # Route definitions with middleware
+├── services/         # Business logic (auth, content, approval, scheduling)
+├── utils/            # Utilities (AppError, response, asyncHandler)
+├── types/            # TypeScript type definitions
+└── app.ts            # Express app setup
+```
+
+### Layering Pattern
+1. **Routes**: Define endpoints and attach middleware
+2. **Controllers**: Handle request/response, call services
+3. **Services**: Business logic, coordinate with repositories
+4. **Repositories**: Direct database access, return domain objects
+
+### Data Flow
+Request → Route → Middleware → Controller → Service → Repository → Database
+
+## Middleware Usage
+
+### Middleware Order
+1. **Security**: helmet, cors
+2. **Rate Limiting**: express-rate-limit
+3. **Request ID**: UUID generation
+4. **Logging**: pinoHttp
+5. **Body Parsing**: express.json
+6. **Authentication**: authenticate (JWT verification)
+7. **Authorization**: authorize (role check)
+8. **Validation**: validate (Zod schema), validateUUID (UUID format)
+9. **Error Handler**: errorHandler (global error handling)
+
+### Request ID Propagation
+- Generated at app entry point
+- Attached to `req.id`
+- Included in all log messages via pino
+- Returned in all API responses via `requestId`
+- Header: `X-Request-ID` for client correlation
+
+### Error Handling
+- Custom `AppError` class with status code
+- Zod validation errors formatted with details
+- Database errors mapped to appropriate HTTP codes
+- JWT errors return 401
+- Multer errors return 400
+- Development: includes stack trace
+- Production: generic error messages only
+
+## Redis Caching Implementation
+
+### Cache Configuration
+- **Library**: ioredis (Redis client for Node.js)
+- **Configuration**: Optional via REDIS_URL environment variable
+- **Graceful Fallback**: If Redis not configured, endpoints work without caching
+- **Connection**: Configured with retry strategy (max 3 attempts)
+- **Logging**: Connection events logged for monitoring
+
+### Cache Strategy for Public Endpoint
+
+**Endpoint**: `GET /content/live/:teacherId`
+
+**Cache Key Pattern**:
+- With subject filter: `live:{teacherId}:{subject}`
+- Without subject filter: `live:{teacherId}:all`
+
+**TTL**: 30 seconds
+- Content rotates every 5 minutes minimum, so 30s TTL is safe
+- Balances freshness with performance
+
+**Cache Flow**:
+1. Check Redis for cached data using cache key
+2. If cache hit: Return cached data immediately with `X-Cache: HIT` header
+3. If cache miss: Compute from database, store in Redis with 30s TTL, return with `X-Cache: MISS` header
+4. If Redis unavailable: Compute from database and return (no caching)
+
+**Cache Invalidation**:
+- Triggered on content approval/rejection
+- Pattern: `live:{teacherId}:*` (busts all keys for that teacher)
+- Implemented in approval.service.ts
+- Ensures stale data is removed when content status changes
+
+### Cache Service API
+
+The `cacheService` in `src/config/redis.ts` provides:
+- `get(key)`: Retrieve cached value
+- `set(key, value, ttlSeconds)`: Store value with TTL
+- `del(key)`: Delete specific key
+- `delPattern(pattern)`: Delete keys matching pattern (for invalidation)
+- `isConnected()`: Check Redis connection status
+
+### Performance Considerations
+
+**Local Redis**: Expected cache hit response time < 5ms
+**Cloud Redis (Upstash)**: Expected cache hit response time ~100-150ms (network latency)
+
+Even with cloud Redis latency, caching provides significant benefit:
+- Reduces database load
+- Scales better under high traffic
+- Consistent performance regardless of content complexity
+
+### Monitoring & Debugging
+
+**X-Cache Header**:
+- Added to all `/content/live/:teacherId` responses
+- Values: `HIT` (served from cache), `MISS` (computed from DB)
+- Useful for verifying cache behavior
+
+**Logging**:
+- `[Redis] Connected successfully` - on successful connection
+- `[Redis] Connection error` - on connection failures
+- `[Scheduling] Cache HIT for {key}` - on cache hit
+- `[Scheduling] Cache MISS for {key}` - on cache miss
+- `[Approval] Cache invalidated for teacher {id}` - on cache invalidation
+
+---
+
+## Scalability Approach
+
+### Current Architecture
+- **Stateless**: JWT tokens, no server-side session state
+- **Deterministic Scheduling**: No database state for rotation calculations
+- **Horizontal Scaling**: Multiple instances can run behind load balancer
+
+### Future Scalability Improvements
+1. **Redis Caching**: ✓ Implemented
+   - Cache live endpoint responses (TTL: 30 seconds)
+   - Key pattern: `live:{teacherId}:{subject|all}`
+   - Invalidate on content approval/rejection
+   - Reduce database load for public endpoint
+   - Graceful fallback when Redis not configured
+
+2. **Database Connection Pooling**: Already configured via pg Pool
+   - Max connections: Configurable via DATABASE_URL
+   - Connection reuse across requests
+
+3. **CDN for Static Files**: Cloudinary already provides CDN
+   - Files served via Cloudinary's global CDN
+   - Automatic image optimization and transformation
+   - Geographic distribution already handled
+
+4. **Message Queue for Background Jobs**:
+   - Email notifications for approval/rejection
+   - File processing (thumbnail generation, format conversion)
+   - Analytics aggregation
+
+5. **Read Replicas**:
+   - Read-heavy operations (live endpoint) on replicas
+   - Write operations on primary
+
+6. **Rate Limiting with Redis**:
+   - Distributed rate limiting across multiple instances
+   - Consistent rate limiting regardless of instance
+
+### Stateless Design Benefits
+- No sticky sessions required
+- Easy horizontal scaling
+- Graceful instance restarts
+- No session cleanup needed
+
+### Monitoring Considerations
+- Request ID for distributed tracing
+- Pino structured logs for aggregation
+- Rate limit metrics for abuse detection
+- Error rate monitoring per endpoint
+- Database query performance metrics
