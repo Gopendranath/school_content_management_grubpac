@@ -84,18 +84,6 @@ app.use(pinoHttp({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("/", (_req, res) => {
-  res.json({ 
-    message: "All routes are under /api/v1",
-    endpoints: {
-      auth: "/api/v1/auth",
-      content: "/api/v1/content",
-      approval: "/api/v1/approval",
-      docs: "/api-docs"
-    }
-   });
-});
-
 // Routes
 import routes from './routes/index.js';
 import docsRoutes from './routes/docs.routes.js';
@@ -114,6 +102,19 @@ app.use('/api/v1', routes);
 // Health check endpoint for Render
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Root endpoint
+app.get("/", (_req, res) => {
+  res.json({ 
+    message: "All routes are under /api/v1",
+    endpoints: {
+      auth: "/api/v1/auth",
+      content: "/api/v1/content",
+      approval: "/api/v1/approval",
+      docs: "/api-docs"
+    }
+   });
 });
 
 // 404 handler
