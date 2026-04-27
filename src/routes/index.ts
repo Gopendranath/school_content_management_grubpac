@@ -5,14 +5,6 @@ import approvalRoutes from './approval.routes.js';
 
 const router = Router();
 
-router.use('/', (_req, res) => {
-  res.json({ 
-    message: "Available endpoints:", 
-    endpoints: ["/auth", "/content", "/content/live"],
-    documentation: "/api-docs"
-  });
-});
-
 // Mount auth routes
 router.use('/auth', authRoutes);
 

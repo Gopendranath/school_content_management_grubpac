@@ -84,9 +84,22 @@ app.use(pinoHttp({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use("/", (_req, res) => {
+  res.json({ 
+    message: "All routes are under /api/v1",
+    endpoints: {
+      auth: "/api/v1/auth",
+      content: "/api/v1/content",
+      approval: "/api/v1/approval",
+      docs: "/api-docs"
+    }
+   });
+});
+
 // Routes
 import routes from './routes/index.js';
 import docsRoutes from './routes/docs.routes.js';
+
 
 // Mount docs route outside /api/v1
 app.use('/api-docs', docsRoutes);
@@ -108,9 +121,6 @@ app.use((req, res) => {
   sendError(res, 'Route not found', 404);
 });
 
-app.use("/", (_req, res) => {
-  res.json({ message: "All routes are under /api/v1" });
-});
 // Global error handler
 app.use(errorHandler);
 
